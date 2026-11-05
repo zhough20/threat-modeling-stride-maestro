@@ -1,0 +1,85 @@
+# EXAMPLE ONLY — hypothetical app, not a real factory system. Contains no real secrets.
+schemaVersion: 1
+system:
+  name: example-ticket-helper
+  owner: example-team
+  example: true
+  description: Small FastAPI app. Users submit support tickets; an LLM agent summarizes and can look up order status via one tool.
+trust_boundaries:
+  - {id: internet, name: Public internet, zone: internet}
+  - {id: app, name: App container, zone: container}
+  - {id: llm, name: Model gateway on LAN, zone: lan}
+elements:
+  - id: user
+    type: external_entity
+    name: End user browser
+    description: Anonymous or logged-in customer submitting tickets through the web form.
+    boundary: internet
+    exposure: internet
+  - id: api
+    type: process
+    name: FastAPI service
+    description: Exposes POST /tickets and GET /tickets/{id}. Session cookie auth. Pydantic models validate request bodies.
+    boundary: app
+    exposure: internet
+    data_classification: pii
+    controls: [session cookie auth, pydantic input validation, structured JSON logging]
+    secret_refs: [APP_SESSION_KEY]
+  - id: db
+    type: data_store
+    name: Postgres tickets DB
+    description: Stores tickets with customer name, email and free text. Accessed via SQLAlchemy ORM.
+    boundary: app
+    exposure: host_only
+    data_classification: pii
+    controls: [parameterized queries via ORM, nightly backup]
+    secret_refs: [DATABASE_URL]
+  - id: f_user_api
+    type: data_flow
+    name: Browser to API
+    description: Ticket text and session cookie sent to the API.
+    source: user
+    destination: api
+    protocol: HTTPS
+    crosses_boundary: true
+    exposure: internet
+    data_classification: pii
+    controls: [TLS 1.2+]
+  - id: summarizer
+    type: agent
+    name: Ticket summarizer agent
+    description: Reads the ticket text, writes a summary, and may call lookup_order to fetch order status. Output is shown to support staff in the admin page.
+    boundary: app
+    exposure: lan
+    data_classification: pii
+    autonomy: acts_autonomously
+    tools: [lookup_order]
+    model: llm
+    untrusted_inputs: [ticket free text]
+    controls: [system prompt tells model to ignore instructions in tickets]
+  - id: lookup_order
+    type: tool
+    name: lookup_order tool
+    description: Takes an order_id string chosen by the agent and queries the orders API with a service token. No per-user scoping.
+    boundary: app
+    exposure: lan
+    data_classification: pii
+    secret_refs: [ORDERS_API_TOKEN]
+  - id: llm
+    type: model
+    name: Gateway-routed local model
+    description: Local model behind a model gateway over plain HTTP on the LAN.
+    boundary: llm
+    exposure: lan
+    data_classification: pii
+    secret_refs: [MODEL_GATEWAY_KEY]
+  - id: f_agent_llm
+    type: data_flow
+    name: Agent to model gateway
+    description: Prompt with ticket text and customer email sent to the model gateway over HTTP.
+    source: summarizer
+    destination: llm
+    protocol: HTTP
+    crosses_boundary: true
+    exposure: lan
+    data_classification: pii

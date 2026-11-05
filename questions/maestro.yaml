@@ -1,0 +1,148 @@
+# MAESTRO (CSA) per-layer questions — v2. Same kinds as stride.yaml (control / weakness / context).
+# Layers: L1 Foundation Models, L2 Data Operations, L3 Agent Frameworks, L4 Deployment & Infrastructure,
+#         L5 Evaluation & Observability, L6 Security & Compliance (vertical), L7 Agent Ecosystem.
+framework: MAESTRO
+version: 2
+sources:
+  maestro: https://cloudsecurityalliance.org/blog/2025/02/06/agentic-ai-threat-modeling-framework-maestro
+  layers: https://agentic-threat-modeling.github.io/MAESTRO/playbook/01-layers.html
+  owasp_llm: https://genai.owasp.org/llm-top-10/
+questions:
+  - id: L1.model_unpinned
+    category: "L1 Foundation Models"
+    kind: weakness
+    applies_to: [model]
+    type: yes_no
+    instructions: Is the model identified only by a generic or floating name, with no pinned version or digest?
+    criteria:
+      "true": Only a generic name, alias, or "latest"-style reference is given.
+      "false": A specific model name with a pinned version, hash, or digest is given.
+    # v1 asked the inverse ("names source and pinned version?"); its 'no' = this 'yes'. Eyeball on replay.
+    replay_from: {id: L1.model_provenance, map: {"yes": "no", "no": "yes"}}
+    mitigation: {id: M-MODEL-PIN, text: "Pin model name+version/digest in config; verify hash on load; record it in every log line."}
+    sources: [https://genai.owasp.org/llmrisk/llm032025-supply-chain/]
+  - id: L2.untrusted_text_in_prompt
+    category: "L2 Data Operations"
+    kind: weakness
+    applies_to: [agent]
+    type: yes_no
+    instructions: Does text written by an untrusted party reach this agent's model prompt?
+    criteria:
+      "true": Customer-written, web, email, document, or tool-returned text is placed in the prompt.
+      "false": The prompt holds only operator-written text and validated structured fields.
+    replay_from: {id: L2.untrusted_text_in_prompt, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-PI-ISOLATE, text: "Mark untrusted text as data (delimiters/spotlighting), strip instructions, and never let it alone authorize a tool call."}
+    sources: [https://genai.owasp.org/llmrisk/llm01-prompt-injection/]
+  - id: L2.pii_to_model
+    category: "L2 Data Operations"
+    kind: context   # rule R-PII-FLOW (flows only; agent-level duplicate dropped in v2)
+    applies_to: [data_flow]
+    type: yes_no
+    instructions: Is personal data such as names or email addresses sent to the model?
+    criteria:
+      "true": The prompt or flow carries names, emails, or customer free text.
+      "false": Personal data is removed or tokenized before reaching the model.
+    replay_from: {id: L2.pii_to_model, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-PII-REDACT, text: "Redact/tokenize PII before prompting; keep the mapping server-side."}
+    sources: [https://genai.owasp.org/llmrisk/llm022025-sensitive-information-disclosure/]
+  - id: L3.tool_args_validated
+    category: "L3 Agent Frameworks"
+    kind: control
+    applies_to: [tool]
+    type: pick_one
+    instructions: What does the description say about checking the arguments the agent chose before the tool acts?
+    criteria:
+      present: Tool arguments are checked by schema, allowlist, or ownership check before use.
+      absent_stated: The description says the tool uses agent-chosen arguments as given.
+      not_mentioned: The description does not say whether tool arguments are checked.
+    replay_from: {id: L3.tool_args_validated, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-TOOL-VALIDATE, text: "Validate tool args with strict schema AND check the target belongs to the end user before executing."}
+    sources: [https://genai.owasp.org/llmrisk/llm062025-excessive-agency/]
+  - id: L3.autonomy_level
+    category: "L3 Agent Frameworks"
+    kind: context   # rule R-AUTONOMY: finding only if the agent has tools
+    code_fact: autonomy
+    applies_to: [agent]
+    type: pick_one
+    instructions: How much can this agent do without a person approving each action?
+    criteria:
+      read_only: The agent only reads data and produces text; it cannot trigger actions.
+      suggests: The agent proposes actions that a person then carries out.
+      acts_with_approval: The agent can act, but a person approves each action first.
+      acts_autonomously: The agent calls tools or changes things with no per-action approval.
+    replay_from: {id: L3.autonomy_level, map: {}}
+    mitigation: {id: M-HITL, text: "Require human approval for side-effecting tool calls; read-only tools by default."}
+    sources: [https://genai.owasp.org/llmrisk/llm062025-excessive-agency/]
+  - id: L3.output_rendered_unsafely
+    category: "L3 Agent Frameworks"
+    kind: weakness
+    applies_to: [agent]
+    type: yes_no
+    instructions: Is the agent's output shown in a web page or passed to another system?
+    criteria:
+      "true": Output is rendered in HTML/admin pages or fed to another program or tool.
+      "false": Output is only stored as plain text that nothing renders or executes.
+    replay_from: {id: L3.output_rendered_unsafely, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-OUTPUT-ENCODE, text: "Treat model output as untrusted: context-encode on render, never eval/execute, schema-validate before downstream use."}
+    sources: [https://genai.owasp.org/llmrisk/llm052025-improper-output-handling/]
+  - id: L4.model_endpoint_exposed
+    category: "L4 Deployment & Infrastructure"
+    kind: weakness
+    applies_to: [model]
+    type: yes_no
+    instructions: Is the model endpoint reachable over plain HTTP or from the whole network?
+    criteria:
+      "true": The endpoint uses plain HTTP, or listens on all interfaces or the LAN without restriction.
+      "false": The endpoint uses TLS and is bound to localhost or an allowlisted network.
+    replay_from: {id: L4.model_endpoint_exposed, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-ENDPOINT-LOCK, text: "Bind model gateway to localhost or allowlisted hosts, front with TLS, require per-app virtual keys."}
+    sources: [https://agentic-threat-modeling.github.io/MAESTRO/playbook/01-layers.html]
+  - id: L5.agent_trace_logged
+    category: "L5 Evaluation & Observability"
+    kind: control
+    applies_to: [agent, tool]
+    type: pick_one
+    instructions: What does the description say about logging each prompt, tool call, and result?
+    criteria:
+      present: Agent traces, tool-call logs, or audit trails are named.
+      absent_stated: The description says agent activity is not logged.
+      not_mentioned: The description does not mention agent activity logging.
+    replay_from: {id: L5.agent_trace_logged, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-AGENT-TRACE, text: "Log prompt hash, model id, tool name+args (masked), result status, and actor per step; alert on anomalies."}
+    sources: [https://agentic-threat-modeling.github.io/MAESTRO/playbook/01-layers.html]
+  - id: L6.guardrail_only_prompt
+    category: "L6 Security & Compliance"
+    kind: weakness
+    applies_to: [agent]
+    type: yes_no
+    instructions: Is a system prompt instruction the only safety control named for this agent?
+    criteria:
+      "true": The only control listed is wording in the system prompt.
+      "false": Controls enforced in code, such as allowlists, approvals, or output filters, are also named.
+    replay_from: {id: L6.guardrail_only_prompt, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-CODE-GUARD, text: "Enforce policy in code (tool allowlist, authz, output filter); prompts are not a security boundary."}
+    sources: [https://genai.owasp.org/llmrisk/llm01-prompt-injection/]
+  - id: L6.shared_service_credential
+    category: "L6 Security & Compliance"
+    kind: weakness
+    applies_to: [tool]
+    type: yes_no
+    instructions: Does the tool act with one shared service credential instead of the end user's identity?
+    criteria:
+      "true": A single service token or account is used for all users.
+      "false": The tool acts on behalf of the specific end user with their scoped identity.
+    replay_from: {id: L6.shared_service_credential, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-DELEGATED-AUTHZ, text: "Propagate end-user identity to tools (token exchange / on-behalf-of) and authorize per user."}
+    sources: [https://agentic-threat-modeling.github.io/MAESTRO/playbook/01-layers.html, https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/]
+  - id: L7.external_agent_or_api
+    category: "L7 Agent Ecosystem"
+    kind: weakness
+    applies_to: [agent, tool]
+    type: yes_no
+    instructions: Does this element talk to third-party agents, MCP servers, or outside APIs?
+    criteria:
+      "true": Calls go to another organization's agent, MCP server, plugin, or external API.
+      "false": All calls stay within systems the same team runs.
+    replay_from: {id: L7.external_agent_or_api, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-ECOSYS-PIN, text: "Allowlist and pin external agents/MCP servers by identity; treat their responses as untrusted input."}
+    sources: [https://cloudsecurityalliance.org/blog/2025/04/30/threat-modeling-google-s-a2a-protocol-with-the-maestro-framework]

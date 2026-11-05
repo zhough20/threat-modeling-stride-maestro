@@ -1,0 +1,55 @@
+# system-model.schema.yaml — JSON Schema (draft 2020-12) written in YAML.
+# Input contract for threatmodel.py. Validated in code (subset) before any decision model call.
+# RULE: no secret values anywhere in a system model. Reference secrets by KEY NAME only
+# in `secret_refs`. The runner masks anything secret-shaped anyway (defence in depth).
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: SystemModel
+type: object
+required: [schemaVersion, system, elements]
+additionalProperties: false
+properties:
+  schemaVersion: {const: 1}
+  system:
+    type: object
+    required: [name, owner]
+    properties:
+      name: {type: string}
+      owner: {type: string}
+      example: {type: boolean, description: "true = hypothetical, not a real system"}
+      description: {type: string}
+  trust_boundaries:
+    type: array
+    items:
+      type: object
+      required: [id, name, zone]
+      properties:
+        id: {type: string, pattern: "^[a-z0-9_-]+$"}
+        name: {type: string}
+        zone: {enum: [internet, lan, host, container, third_party]}
+  elements:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, type, name, description]
+      additionalProperties: false
+      properties:
+        id: {type: string, pattern: "^[a-z0-9_-]+$"}
+        type: {enum: [process, data_store, data_flow, external_entity, agent, tool, model]}
+        name: {type: string}
+        description: {type: string, maxLength: 4000}
+        boundary: {type: string, description: "trust_boundaries[].id this element lives in"}
+        exposure: {enum: [host_only, lan, internet], default: lan}
+        data_classification: {enum: [public, internal, pii, credentials], default: internal}
+        controls: {type: array, items: {type: string}, description: "declared controls, plain words"}
+        secret_refs: {type: array, items: {type: string, pattern: "^[A-Z][A-Z0-9_]*$"}, description: "env KEY NAMES only"}
+        # data_flow only
+        source: {type: string}
+        destination: {type: string}
+        protocol: {type: string}
+        crosses_boundary: {type: boolean}
+        # agent only
+        autonomy: {enum: [read_only, suggests, acts_with_approval, acts_autonomously]}
+        tools: {type: array, items: {type: string}, description: "ids of tool elements"}
+        model: {type: string, description: "id of model element"}
+        untrusted_inputs: {type: array, items: {type: string}}

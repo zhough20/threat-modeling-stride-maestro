@@ -1,0 +1,158 @@
+# STRIDE question set for the decision model — v2 (calibration 2026-10-30).
+# Wording lives HERE only. The decision model answers ONE narrow fact per question; code decides outcome.
+# kind:
+#   control  = tri-state choice: present | absent_stated | not_mentioned
+#              present -> clear; absent_stated -> confirmed_finding; not_mentioned -> documentation_gap (info)
+#   weakness = yes_no; yes = description AFFIRMATIVELY shows the weakness -> confirmed_finding
+#   context  = yes_no; yes alone is NOT a finding; a code rule combines it with model attributes
+# applies_to follows Microsoft STRIDE-per-element, narrowed where noted; code enforces it.
+# replay_from: how a v1 recorded answer maps into this v2 question (used by --replay only).
+framework: STRIDE
+version: 2
+sources:
+  stride: https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats
+  owasp_tm: https://owasp.org/www-community/Threat_Modeling_Process
+questions:
+  - id: S.authn_present
+    category: Spoofing
+    kind: control
+    applies_to: [process, tool, data_flow]   # data_flow only when crosses_boundary (code rule R-FLOW-AUTHN)
+    type: pick_one
+    instructions: What does the description say about callers authenticating before using this element (for a data flow, the sender authenticating to the receiver)?
+    criteria:
+      present: An authentication mechanism is named, such as session auth, OAuth, mTLS, an API key check, or signed requests.
+      absent_stated: The description says access is anonymous, unauthenticated, or open to anyone.
+      not_mentioned: The description does not say how callers authenticate.
+    replay_from: {id: S.authn_present, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-AUTHN, text: "Require authentication on every entry point (OIDC/session or mTLS for service-to-service); deny by default."}
+    sources: [https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats, https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html]
+  - id: S.external_identity_verified
+    category: Spoofing
+    kind: control
+    applies_to: [external_entity]
+    type: pick_one
+    instructions: What does the description say about how this outside party's identity is verified?
+    criteria:
+      present: A login, signed token, certificate, or verified account is named for this party.
+      absent_stated: The description says the party is anonymous or unverified.
+      not_mentioned: The description does not say how the party is identified.
+    replay_from: {id: S.external_identity_verified, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-IDV, text: "Bind actions to a verified identity (login/OIDC); treat anonymous parties as untrusted and rate-limit them."}
+    sources: [https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats]
+  - id: T.input_validation
+    category: Tampering
+    kind: control
+    applies_to: [process, tool]
+    type: pick_one
+    instructions: What does the description say about validating inputs before they are used?
+    criteria:
+      present: Schema validation (e.g. pydantic, JSON Schema) or an allowlist on input values is named.
+      absent_stated: The description says inputs are used as received or chosen freely by another component.
+      not_mentioned: The description does not say whether inputs are validated.
+    replay_from: {id: T.input_validation, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-VALIDATE, text: "Validate all inputs with strict schemas (types, lengths, allowlists); reject on failure."}
+    sources: [https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html]
+  - id: T.query_parameterized
+    category: Tampering
+    kind: control
+    applies_to: [data_store]
+    type: pick_one
+    instructions: What does the description say about how this store is queried?
+    criteria:
+      present: Parameterized queries, prepared statements, or an ORM are named.
+      absent_stated: The description says queries are built by joining strings or formatting text.
+      not_mentioned: The description does not say how queries are built.
+    replay_from: {id: T.query_parameterized, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-PARAMQ, text: "Use parameterized queries/ORM only; ban string-built SQL with a lint rule (bandit B608)."}
+    sources: [https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html]
+  - id: T.transport_integrity
+    category: Tampering
+    kind: control
+    code_fact: protocol   # if the model sets `protocol`, CODE decides and the decision model is not asked
+    applies_to: [data_flow]
+    type: pick_one
+    instructions: What does the description say about the transport this flow uses?
+    criteria:
+      present: The flow uses HTTPS, TLS, mTLS, or SSH.
+      absent_stated: The flow uses plain HTTP or plain TCP.
+      not_mentioned: The transport is not stated.
+    replay_from: {id: T.transport_integrity, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-TLS, text: "Use TLS 1.2+ (mTLS for service-to-service) on every flow that crosses a trust boundary."}
+    sources: [https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html]
+  - id: R.audit_logging
+    category: Repudiation
+    kind: control
+    applies_to: [process, agent, tool, external_entity]
+    type: pick_one
+    instructions: What does the description say about logging who performed each action?
+    criteria:
+      present: Audit or structured logging that records the actor and time is named.
+      absent_stated: The description says actions are not logged or logs do not identify the actor.
+      not_mentioned: The description does not mention logging.
+    replay_from: {id: R.audit_logging, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-AUDIT, text: "Write append-only audit logs with actor, action, target, timestamp; ship off-host."}
+    sources: [https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html]
+  - id: I.encryption_at_rest
+    category: Information Disclosure
+    kind: control
+    applies_to: [data_store]
+    type: pick_one
+    instructions: What does the description say about encrypting the stored data at rest?
+    criteria:
+      present: Disk, database, or field-level encryption at rest is named.
+      absent_stated: The description says the data is stored unencrypted.
+      not_mentioned: The description does not mention encryption at rest.
+    replay_from: {id: I.encryption_at_rest, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-ENC-REST, text: "Encrypt at rest (volume/DB encryption; field-level for PII/credentials); keys outside the data store."}
+    sources: [https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html]
+  - id: I.sensitive_data_in_flow
+    category: Information Disclosure
+    kind: context   # rule R-PII-FLOW decides (needs no-TLS, or less-trusted zone, or a model destination)
+    applies_to: [data_flow]
+    type: yes_no
+    instructions: Does this flow carry personal data or credentials?
+    criteria:
+      "true": Names, emails, free-text customer data, tokens, or passwords are carried.
+      "false": Only public or non-identifying data is carried.
+    replay_from: {id: I.sensitive_data_in_flow, map: {"yes": "yes", "no": "no"}}
+    mitigation: {id: M-MINIMIZE, text: "Minimize/redact PII before it leaves the component; send only fields the receiver needs."}
+    sources: [https://owasp.org/Top10/A02_2021-Cryptographic_Failures/]
+  - id: D.rate_limiting
+    category: Denial of Service
+    kind: control
+    applies_to: [process]   # entry points only (v1 also asked flows and agents: noise)
+    type: pick_one
+    instructions: What does the description say about rate limits, quotas, or request size caps?
+    criteria:
+      present: Rate limiting, quotas, timeouts, or body size caps are named.
+      absent_stated: The description says there are no limits on requests.
+      not_mentioned: The description does not mention any such limits.
+    replay_from: {id: D.rate_limiting, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-RATELIMIT, text: "Add per-identity rate limits, request size caps, and timeouts at the reverse proxy and app."}
+    sources: [https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html, https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/]
+  - id: E.authz_per_object
+    category: Elevation of Privilege
+    kind: control
+    applies_to: [process, tool]
+    type: pick_one
+    instructions: What does the description say about checking that the caller may access the specific record requested?
+    criteria:
+      present: Per-user or per-object authorization checks are named.
+      absent_stated: The description says there is no per-user scoping, or any caller can fetch any record.
+      not_mentioned: The description does not say how access to individual records is checked.
+    replay_from: {id: E.authz_per_object, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-AUTHZ, text: "Enforce object-level authorization with the end user's identity on every access; deny by default."}
+    sources: [https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/]
+  - id: E.least_privilege_identity
+    category: Elevation of Privilege
+    kind: control
+    applies_to: [process, agent, tool, data_store]
+    type: pick_one
+    instructions: What does the description say about the identity or credential this element runs with?
+    criteria:
+      present: A narrowly scoped role, read-only account, or per-function credential is named.
+      absent_stated: The description says a shared, admin, or broad service credential is used.
+      not_mentioned: The description does not say what identity or credential is used.
+    replay_from: {id: E.least_privilege_identity, map: {"yes": present, "no": absent_or_not_mentioned}}
+    mitigation: {id: M-LEASTPRIV, text: "Give each component its own least-privilege identity; scope tokens to the minimum actions and set expiry."}
+    sources: [https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats]
